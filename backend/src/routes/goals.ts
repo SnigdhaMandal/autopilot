@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { verifyAuth } from "../middleware/auth";
 import { getDb } from "../lib/db";
+import { parseRuleAsset } from "../lib/ruleAsset";
 
 export default async function goalsRoutes(server: FastifyInstance) {
   server.addHook("onRequest", verifyAuth);
@@ -23,16 +24,25 @@ export default async function goalsRoutes(server: FastifyInstance) {
       return reply.status(400).send({ error: "Name and target amount are required" });
     }
 
+    // Goals are denominated in a single asset. Rejecting an unsupported value
+    // rather than defaulting keeps a typo from creating an XLM goal the user
+    // believes is in USDC. The DB CHECK constraint is the backstop.
+    const asset = parseRuleAsset(body.asset ?? "XLM");
+    if (!asset) {
+      return reply.status(400).send({ error: "asset must be either XLM or USDC" });
+    }
+
     const result = await sql`
       INSERT INTO "Goal" (
-        "userId", name, "targetAmount", "currentAmount", emoji
+        "userId", name, "targetAmount", "currentAmount", emoji, asset
       )
       VALUES (
         ${request.user!.id}::uuid,
         ${body.name},
         ${body.targetAmount},
         0,
-        ${body.emoji || "🎯"}
+        ${body.emoji || "🎯"},
+        ${asset}
       )
       RETURNING *
     `;

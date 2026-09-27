@@ -16,6 +16,7 @@
 import cron, { ScheduledTask } from "node-cron";
 import { getDb } from "../lib/db";
 import { getCronQueue, CronJobData } from "./queue";
+import { ruleAsset } from "./processor";
 
 const activeCronJobs = new Map<string, ScheduledTask>(); // ruleId → cron task
 
@@ -66,6 +67,7 @@ function registerCronRule(rule: {
   isPercentage: boolean;
   memo: string | null;
   publicKey: string;
+  description?: string | null;
 }) {
   if (activeCronJobs.has(rule.id)) return; // Already registered
 
@@ -85,6 +87,7 @@ function registerCronRule(rule: {
       isPercentage: rule.isPercentage,
       action: rule.action,
       memo: rule.memo,
+      asset: ruleAsset(rule),
     };
 
     await getCronQueue().add(`cron:${rule.id}:${Date.now()}`, jobData);

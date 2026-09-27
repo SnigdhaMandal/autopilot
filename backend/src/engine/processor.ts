@@ -34,6 +34,28 @@ export function parseAssetCode(asset: string): SupportedAsset | null {
   return code === "XLM" || code === "USDC" ? code : null;
 }
 
+/**
+ * Infer which asset a rule operates on from its own text.
+ *
+ * Used for scheduled (cron) rules, where there is no incoming payment to read
+ * the asset from. Defaults to XLM so an unqualified rule behaves as before.
+ * A rule naming both assets is treated as XLM — the safer default, since XLM
+ * needs no trustline.
+ */
+export function ruleAsset(rule: {
+  trigger?: string | null;
+  action?: string | null;
+  memo?: string | null;
+  description?: string | null;
+}): SupportedAsset {
+  const text = [rule.trigger, rule.action, rule.memo, rule.description]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return text.includes("usdc") && !text.includes("xlm") ? "USDC" : "XLM";
+}
+
 export function doesPaymentMatchTrigger(trigger: string, asset: string): boolean {
   const t = trigger.toLowerCase();
 
@@ -180,13 +202,15 @@ export async function processPaymentDirect(data: PaymentJobData): Promise<any> {
 
       await sql`
         INSERT INTO "AutomatedTransaction"
-          (id, "userId", "ruleId", amount, type, memo, "txHash", "createdAt")
+          (id, "userId", "ruleId", amount, type, asset, memo, "txHash", "createdAt")
         VALUES
           (gen_random_uuid(), ${userId}::uuid, ${rule.id}::uuid,
-           ${execAmount}, ${action}, ${memo}, ${txHash}, NOW())
+           ${execAmount}, ${action}, ${assetCode}, ${memo}, ${txHash}, NOW())
       `;
 
       // ── Step 8: Increment linked Goal's currentAmount ──────────────
+      // Only credit goals denominated in the asset that just moved: adding
+      // 5 USDC to a 1000 XLM goal would silently corrupt its progress.
       try {
         await sql`
           UPDATE "Goal"
@@ -195,6 +219,7 @@ export async function processPaymentDirect(data: PaymentJobData): Promise<any> {
             "updatedAt" = NOW()
           WHERE "linkedRuleId" = ${rule.id}::uuid
             AND "userId" = ${userId}::uuid
+            AND asset = ${assetCode}
             AND "currentAmount" < "targetAmount"
         `;
       } catch (goalErr: any) {
@@ -250,18 +275,21 @@ async function processCronJob(job: Job<CronJobData>) {
   const destination = process.env.AUTOPILOT_PUBLIC_KEY!;
   const memoText = (memo ?? `AutoPilot:${action}:${execAmount}`).slice(0, 28);
   const execAmountStr = execAmount.toFixed(7);
+  // Scheduled rules carry their own asset (there is no incoming payment to
+  // infer it from); default to XLM so existing cron jobs are unaffected.
+  const cronAsset: SupportedAsset = job.data.asset === "USDC" ? "USDC" : "XLM";
 
   try {
-    const txHash = await executeRuleTransaction(destination, execAmountStr, memoText);
+    const txHash = await executeRuleTransaction(destination, execAmountStr, memoText, cronAsset);
     await sql`
       INSERT INTO "AutomatedTransaction"
-        (id, "userId", "ruleId", amount, type, memo, "txHash", "createdAt")
+        (id, "userId", "ruleId", amount, type, asset, memo, "txHash", "createdAt")
       VALUES
         (gen_random_uuid(), ${userId}::uuid, ${ruleId}::uuid,
-         ${execAmount}, ${action.toLowerCase()}, ${memoText}, ${txHash}, NOW())
+         ${execAmount}, ${action.toLowerCase()}, ${cronAsset}, ${memoText}, ${txHash}, NOW())
     `;
     try { await recordSpend(userId, execAmount); } catch {}
-    console.log(`[Processor] ✅ Cron rule "${action}" | ${execAmountStr} XLM | tx: ${txHash.slice(0, 20)}…`);
+    console.log(`[Processor] ✅ Cron rule "${action}" | ${execAmountStr} ${cronAsset} | tx: ${txHash.slice(0, 20)}…`);
     return { status: "executed", txHash, amount: execAmountStr };
   } catch (err: any) {
     console.error(`[Processor] ✗ Cron tx failed:`, err?.message);

@@ -14,7 +14,8 @@
     "gen-keypair": "tsx src/scripts/genKeypair.ts",
     "simulate": "tsx src/scripts/simulate-payment.ts",
     "e2e": "tsx src/scripts/e2e.ts",
-    "migrate:limits": "tsx src/migrations/addLimitsAndTxTable.ts"
+    "migrate:limits": "tsx src/migrations/addLimitsAndTxTable.ts",
+    "migrate:asset": "tsx src/migrations/addAssetColumns.ts"
   },
   "keywords": [],
   "author": "",

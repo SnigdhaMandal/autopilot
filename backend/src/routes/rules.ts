@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { verifyAuth } from "../middleware/auth";
 import { getDb } from "../lib/db";
+import { normalizeRuleAsset } from "../lib/ruleAsset";
 
 export default async function rulesRoutes(server: FastifyInstance) {
   server.addHook("onRequest", verifyAuth);
@@ -19,6 +20,11 @@ export default async function rulesRoutes(server: FastifyInstance) {
     const body = request.body as any;
     const sql = getDb();
 
+    // The asset a rule acts on is carried in its trigger text, which is what
+    // the payment matcher reads. Normalise so a declared `asset` and the
+    // trigger can never disagree — see lib/ruleAsset.ts.
+    const { trigger } = normalizeRuleAsset(body);
+
     const result = await sql`
       INSERT INTO "Rule" (
         id, "userId", trigger, action, amount, "isPercentage", limits, status, memo, description, "createdAt", "updatedAt"
@@ -26,7 +32,7 @@ export default async function rulesRoutes(server: FastifyInstance) {
       VALUES (
         gen_random_uuid(),
         ${request.user!.id}::uuid,
-        ${body.trigger},
+        ${trigger},
         ${body.action},
         ${body.amount},
         ${body.isPercentage ?? false},

@@ -10,6 +10,7 @@ export default async function GoalsPage() {
   const [rawGoals, rawRules] = await Promise.all([
     sql`
       SELECT g.id, g.name,
+             g.asset,
              g."targetAmount",
              g."currentAmount",
              g.emoji,
@@ -21,7 +22,7 @@ export default async function GoalsPage() {
       ORDER  BY g."createdAt" DESC
     `.catch(() => []),
     sql`
-      SELECT r.id, r.description, r.action,
+      SELECT r.id, r.description, r.action, r.trigger, r.memo,
              r.amount, r."isPercentage", r.status
       FROM   "Rule" r
       JOIN   "User" u ON r."userId" = u.id
@@ -34,6 +35,7 @@ export default async function GoalsPage() {
   const goals = (rawGoals as any[]).map((g) => ({
     id:           g.id,
     name:         g.name,
+    asset:        g.asset === "USDC" ? "USDC" : "XLM",
     targetAmount: Number(g.targetAmount ?? g.target_amount ?? 0),
     currentAmount: Number(g.currentAmount ?? g.current_amount ?? 0),
     emoji:        g.emoji ?? "🎯",
@@ -44,6 +46,8 @@ export default async function GoalsPage() {
   const rules = (rawRules as any[]).map((r) => ({
     id:          r.id,
     description: r.description ?? null,
+    trigger:     r.trigger ?? null,
+    memo:        r.memo ?? null,
     action:      r.action,
     amount:      Number(r.amount ?? 0),
     isPercentage: r.isPercentage ?? r.is_percentage ?? false,

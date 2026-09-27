@@ -51,11 +51,14 @@ function ActivityItem({
   memo,
   amount,
   createdAt,
+  asset = "XLM",
 }: {
   type: string;
   memo: string | null;
   amount: number;
   createdAt: string;
+  /** Rows written before asset tracking existed are XLM. */
+  asset?: string;
 }) {
   const isIncoming = type === "save" || type === "invest";
   return (
@@ -81,7 +84,8 @@ function ActivityItem({
       </div>
       <div className="text-right">
         <p className="text-xs font-semibold text-white/60 whitespace-nowrap">
-          {Number(amount).toFixed(4)} XLM
+          {Number(amount).toFixed(4)}{" "}
+          <span className={asset === "USDC" ? "text-emerald-300/70" : undefined}>{asset}</span>
         </p>
         <p className="text-[10px] text-white/25">
           {new Date(createdAt).toLocaleDateString()}
@@ -118,6 +122,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [publicKey, setPublicKey] = useState("");
   const [xlmBalance, setXlmBalance] = useState("0");
+  const [usdcBalance, setUsdcBalance] = useState("0");
+  const [hasUsdcTrustline, setHasUsdcTrustline] = useState(false);
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [txRows, setTxRows] = useState<any[]>([]);
   const [activeRules, setActiveRules] = useState(0);
@@ -167,18 +173,24 @@ export default function DashboardPage() {
             );
             if (horizonRes.ok) {
               const horizonData = await horizonRes.json();
-              const native = (horizonData.balances ?? []).find(
-                (b: any) => b.asset_type === "native"
-              );
+              const balances = horizonData.balances ?? [];
+              const native = balances.find((b: any) => b.asset_type === "native");
               setXlmBalance(native?.balance ?? "0");
+              // USDC is held via a trustline, so it appears as a credit_alphanum4
+              // entry rather than the native balance.
+              const usdc = balances.find((b: any) => b.asset_code === "USDC");
+              setUsdcBalance(usdc?.balance ?? "0");
+              setHasUsdcTrustline(Boolean(usdc));
               setIsUnfunded(false);
             } else {
               // 404 = account not funded yet on testnet
               setXlmBalance("0");
+              setUsdcBalance("0");
               setIsUnfunded(true);
             }
           } catch {
             setXlmBalance("0");
+            setUsdcBalance("0");
           }
         }
       } catch (err) {
@@ -199,15 +211,26 @@ export default function DashboardPage() {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const savedThisMonth = txRows
-    .filter((tx: any) => tx.type === "save" && new Date(tx.createdAt) >= startOfMonth)
-    .reduce((sum: number, tx: any) => sum + Number(tx.amount), 0);
+  // Totals are per-asset: summing XLM and USDC amounts into one figure would be
+  // meaningless, since they are different currencies at different prices.
+  const sumByAsset = (rows: any[], asset: string) =>
+    rows
+      .filter((tx: any) => (tx.asset ?? "XLM") === asset)
+      .reduce((sum: number, tx: any) => sum + Number(tx.amount), 0);
 
-  const totalInvested = txRows
-    .filter((tx: any) => tx.type === "invest")
-    .reduce((sum: number, tx: any) => sum + Number(tx.amount), 0);
+  const savedRows = txRows.filter(
+    (tx: any) => tx.type === "save" && new Date(tx.createdAt) >= startOfMonth,
+  );
+  const investedRows = txRows.filter((tx: any) => tx.type === "invest");
+
+  const savedThisMonth = sumByAsset(savedRows, "XLM");
+  const savedThisMonthUsdc = sumByAsset(savedRows, "USDC");
+  const totalInvested = sumByAsset(investedRows, "XLM");
+  const totalInvestedUsdc = sumByAsset(investedRows, "USDC");
 
   const xlmNum = parseFloat(xlmBalance);
+  const usdcNum = parseFloat(usdcBalance);
+  // Rate compares like with like: XLM saved against the XLM balance.
   const savingsRate = xlmNum > 0 ? Math.min(Math.round((savedThisMonth / xlmNum) * 100), 100) : 0;
 
   const greeting = (() => {
@@ -271,23 +294,52 @@ export default function DashboardPage() {
 
             <div className="flex items-baseline gap-2 md:gap-3 mb-2 flex-wrap">
               <span className="text-4xl md:text-5xl font-bold text-white tracking-tight leading-tight min-w-0 [overflow-wrap:anywhere]">
-                {parseFloat(xlmBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {xlmNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
               <span className="text-xl md:text-2xl font-medium text-white/30 whitespace-nowrap">XLM</span>
             </div>
 
+            {/* USDC sits alongside XLM as a first-class balance. Shown whenever
+                a trustline exists, including at zero, so the user can see the
+                account is ready to receive USDC. */}
+            {hasUsdcTrustline && (
+              <div className="flex items-baseline gap-2 mb-2 flex-wrap">
+                <span className="text-2xl md:text-3xl font-semibold text-emerald-300/90 tracking-tight min-w-0 [overflow-wrap:anywhere]">
+                  {usdcNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-base md:text-lg font-medium text-emerald-300/40 whitespace-nowrap">USDC</span>
+              </div>
+            )}
+
             <p className="text-white/25 text-sm">
-              Live balance from Stellar Horizon API
+              {hasUsdcTrustline
+                ? "Live XLM + USDC balances from Stellar Horizon API"
+                : "Live balance from Stellar Horizon API"}
             </p>
           </div>
         </div>
 
         {/* Metrics */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <MetricTile label="Saved this month" value={`${savedThisMonth.toFixed(2)} XLM`} sub="via active rules" icon={Shield} accent="bg-green-500" />
+          {/* USDC totals are surfaced in the subtitle rather than as separate
+              tiles, so the row stays four wide and only mentions USDC when
+              automation has actually moved some. */}
+          <MetricTile
+            label="Saved this month"
+            value={`${savedThisMonth.toFixed(2)} XLM`}
+            sub={savedThisMonthUsdc > 0 ? `+ ${savedThisMonthUsdc.toFixed(2)} USDC` : "via active rules"}
+            icon={Shield}
+            accent="bg-green-500"
+          />
           <MetricTile label="Active rules" value={String(activeRules)} sub={activeRules === 0 ? "Create your first" : "automations running"} icon={Zap} accent="bg-blue-500" />
-          <MetricTile label="Invested" value={`${totalInvested.toFixed(2)} XLM`} sub="total automated" icon={TrendingUp} accent="bg-purple-500" />
-          <MetricTile label="Savings rate" value={`${savingsRate}%`} sub="of balance saved" icon={Activity} accent="bg-amber-500" />
+          <MetricTile
+            label="Invested"
+            value={`${totalInvested.toFixed(2)} XLM`}
+            sub={totalInvestedUsdc > 0 ? `+ ${totalInvestedUsdc.toFixed(2)} USDC` : "total automated"}
+            icon={TrendingUp}
+            accent="bg-purple-500"
+          />
+          <MetricTile label="Savings rate" value={`${savingsRate}%`} sub="of XLM balance saved" icon={Activity} accent="bg-amber-500" />
         </div>
 
         {/* Activity Feed */}
@@ -307,7 +359,7 @@ export default function DashboardPage() {
               <EmptyActivity />
             ) : (
               txRows.map((tx: any) => (
-                <ActivityItem key={tx.id} type={tx.type} memo={tx.memo} amount={tx.amount} createdAt={tx.createdAt} />
+                <ActivityItem key={tx.id} type={tx.type} memo={tx.memo} amount={tx.amount} createdAt={tx.createdAt} asset={tx.asset ?? "XLM"} />
               ))
             )}
           </div>
