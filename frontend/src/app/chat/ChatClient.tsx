@@ -1,12 +1,20 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Send, Sparkles, Bot, User, Zap, Clock, DollarSign,
   AlertCircle, CheckCircle2, Loader2, Edit3, TrendingUp,
   Shield, ArrowUpRight, RefreshCw, MessageCircle, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  computeActivityStats,
+  buildWeeklyTip,
+  fmtXlm,
+  pctChange,
+  type ActivityStats,
+  type TxRow,
+} from "@/lib/insights";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Rule {
@@ -55,31 +63,91 @@ const SUGGESTIONS = [
   { label: "Keep 200 XLM buffer", icon: "🛡️" },
 ];
 
-// ── Build insight cards from rules ────────────────────────────────────────────
-function buildInsights(rules: Rule[]): InsightCard[] {
+// ── Build insight cards from rules + real activity ────────────────────────────
+function buildInsights(rules: Rule[], stats: ActivityStats): InsightCard[] {
   const cards: InsightCard[] = [];
   const safe = (rules ?? []).filter((r) => r != null && r.action != null);
   const saveRules   = safe.filter(r => r.action === "Save"   && r.status === "active");
   const investRules = safe.filter(r => r.action === "Invest" && r.status === "active");
+  const bufferRules = safe.filter(r => r.action === "Buffer" && r.status === "active");
   const pausedRules = safe.filter(r => r.status === "paused");
 
+  const savedAllTime = stats.byTypeAllTime.Save ?? 0;
+  const savedThisWeek = stats.byTypeThisWeek.Save ?? 0;
+  const investedAllTime = stats.byTypeAllTime.Invest ?? 0;
+  const weekChange = pctChange(stats.thisWeekTotal, stats.lastWeekTotal);
+
   if (saveRules.length > 0) {
+    // Report what the rules actually moved, not merely that they exist.
+    const body = savedAllTime > 0
+      ? `Your ${saveRules.length} saving rule${saveRules.length > 1 ? "s have" : " has"} set aside ${fmtXlm(savedAllTime)} XLM in total${
+          savedThisWeek > 0 ? `, including ${fmtXlm(savedThisWeek)} XLM this week` : ""
+        }.`
+      : `You have ${saveRules.length} active saving rule${saveRules.length > 1 ? "s" : ""}, but ${
+          saveRules.length > 1 ? "they haven't" : "it hasn't"
+        } fired yet. AutoPilot acts when a payment arrives.`;
+
     cards.push({
       id: "savings", icon: Shield,
-      title: "Your savings are on track",
-      body: `You have ${saveRules.length} active saving rule${saveRules.length > 1 ? "s" : ""}. AutoPilot is watching every payment and setting aside your target amount automatically.`,
+      title: savedAllTime > 0 ? `${fmtXlm(savedAllTime)} XLM saved automatically` : "Savings rule armed",
+      body,
       actionLabel: "Increase savings rate",
-      actionPrompt: "Help me increase my savings rate — what rule should I create?",
+      actionPrompt: savedAllTime > 0
+        ? `I've saved ${fmtXlm(savedAllTime)} XLM automatically. Help me increase my savings rate.`
+        : "Help me increase my savings rate — what rule should I create?",
       accent: "from-green-500/10 border-green-500/15 text-green-400",
+    });
+  }
+
+  // Week-over-week movement, only once there is a prior week to compare against.
+  if (weekChange !== null && stats.txCountThisWeek > 0) {
+    const up = weekChange >= 0;
+    cards.push({
+      id: "momentum", icon: TrendingUp,
+      title: up ? `Up ${weekChange}% this week` : `Down ${Math.abs(weekChange)}% this week`,
+      body: `You automated ${fmtXlm(stats.thisWeekTotal)} XLM this week versus ${fmtXlm(stats.lastWeekTotal)} XLM last week, across ${stats.txCountThisWeek} transfer${stats.txCountThisWeek > 1 ? "s" : ""}.`,
+      actionLabel: up ? "Lock in the higher rate" : "Steady my contributions",
+      actionPrompt: up
+        ? `My automated savings rose ${weekChange}% this week. Help me lock in a higher rate.`
+        : `My automated savings fell ${Math.abs(weekChange)}% this week. Help me steady my contributions.`,
+      accent: up
+        ? "from-blue-500/10 border-blue-500/15 text-blue-400"
+        : "from-amber-500/10 border-amber-500/15 text-amber-400",
     });
   }
 
   if (investRules.length > 0) {
     cards.push({
       id: "invest", icon: TrendingUp,
-      title: "Investment automation active",
-      body: `${investRules.length} investment rule${investRules.length > 1 ? "s are" : " is"} running. Consistent automated investing is one of the best strategies for long-term wealth building.`,
+      title: investedAllTime > 0 ? `${fmtXlm(investedAllTime)} XLM invested` : "Investment automation active",
+      body: investedAllTime > 0
+        ? `${investRules.length} investment rule${investRules.length > 1 ? "s have" : " has"} moved ${fmtXlm(investedAllTime)} XLM into your investment allocation so far.`
+        : `${investRules.length} investment rule${investRules.length > 1 ? "s are" : " is"} running but hasn't triggered yet. Consistent automated investing compounds over time.`,
       accent: "from-blue-500/10 border-blue-500/15 text-blue-400",
+    });
+  }
+
+  // Rules exist but nothing has ever fired — the trigger is the likely culprit.
+  if (safe.length > 0 && stats.txCountAllTime === 0) {
+    cards.push({
+      id: "never-fired", icon: AlertCircle,
+      title: "Your rules haven't fired yet",
+      body: `You have ${safe.length} rule${safe.length > 1 ? "s" : ""} configured but no automated transfers recorded. AutoPilot only acts on payments matching your trigger — it may need adjusting.`,
+      actionLabel: "Check my triggers",
+      actionPrompt: "My rules are set up but have never triggered. Help me fix my rule triggers.",
+      accent: "from-orange-500/10 border-orange-500/15 text-orange-400",
+    });
+  }
+
+  // Previously active automation that has gone quiet.
+  if (stats.txCountAllTime > 0 && stats.daysSinceLastTx !== null && stats.daysSinceLastTx >= 14) {
+    cards.push({
+      id: "stalled", icon: Clock,
+      title: `Quiet for ${stats.daysSinceLastTx} days`,
+      body: `Your last automated transfer was ${stats.daysSinceLastTx} days ago, after automating ${fmtXlm(stats.allTimeTotal)} XLM in total. Worth checking whether your income still matches your triggers.`,
+      actionLabel: "Review my triggers",
+      actionPrompt: "My automations stopped firing two weeks ago. Help me review my triggers.",
+      accent: "from-amber-500/10 border-amber-500/15 text-amber-400",
     });
   }
 
@@ -105,12 +173,22 @@ function buildInsights(rules: Rule[]): InsightCard[] {
     });
   }
 
+  // Weekly tip is derived from configuration + activity, and rotates weekly
+  // once the user is in a steady state — never a single frozen string.
+  const tip = buildWeeklyTip({
+    hasSaveRule: saveRules.length > 0,
+    hasInvestRule: investRules.length > 0,
+    hasBufferRule: bufferRules.length > 0,
+    pausedCount: pausedRules.length,
+    stats,
+  });
+
   cards.push({
     id: "tip", icon: Sparkles,
     title: "Weekly tip",
-    body: "Consider setting a monthly spending buffer rule — if your balance drops below a threshold, AutoPilot can alert you and pause non-essential outflows.",
-    actionLabel: "Set up a buffer rule",
-    actionPrompt: "Help me set up a balance buffer rule to protect my spending floor",
+    body: tip.body,
+    actionLabel: tip.actionLabel,
+    actionPrompt: tip.actionPrompt,
     accent: "from-purple-500/10 border-purple-500/15 text-purple-400",
   });
 
@@ -431,8 +509,14 @@ function ChatBubble({
 }
 
 // ── Coach View ────────────────────────────────────────────────────────────────
-function CoachView({ rules, onAsk }: { rules: Rule[]; onAsk: (prompt: string) => void }) {
-  const insights = buildInsights(rules);
+function CoachView({
+  rules, stats, onAsk,
+}: {
+  rules: Rule[];
+  stats: ActivityStats;
+  onAsk: (prompt: string) => void;
+}) {
+  const insights = buildInsights(rules, stats);
   return (
     <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 md:py-6">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
@@ -441,7 +525,11 @@ function CoachView({ rules, onAsk }: { rules: Rule[]; onAsk: (prompt: string) =>
           <p className="text-xs font-semibold text-white/40 uppercase tracking-wider">Weekly Insights</p>
         </div>
         <p className="text-sm text-white/30">
-          AutoPilot has analysed your {rules.length} rule{rules.length !== 1 ? "s" : ""}. Here's what it found:
+          AutoPilot analysed your {rules.length} rule{rules.length !== 1 ? "s" : ""}
+          {stats.txCountAllTime > 0
+            ? ` and ${stats.txCountAllTime} automated transfer${stats.txCountAllTime !== 1 ? "s" : ""}`
+            : ""}
+          . Here's what it found:
         </p>
       </motion.div>
       <div className="space-y-4">
@@ -456,8 +544,18 @@ function CoachView({ rules, onAsk }: { rules: Rule[]; onAsk: (prompt: string) =>
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function ChatClient({ initialRules }: { initialRules: Rule[] }) {
+export default function ChatClient({
+  initialRules,
+  initialTransactions = [],
+}: {
+  initialRules: Rule[];
+  initialTransactions?: TxRow[];
+}) {
   const [rules, setRules] = useState<Rule[]>(initialRules);
+  // Activity stats are derived once per transaction set. Computing them in a
+  // memo (rather than at module scope) keeps the week boundaries fresh on
+  // navigation without recalculating on every keystroke in the input box.
+  const stats = useMemo(() => computeActivityStats(initialTransactions), [initialTransactions]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -607,7 +705,7 @@ export default function ChatClient({ initialRules }: { initialRules: Rule[] }) {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="flex-1 overflow-hidden flex flex-col"
           >
-            <CoachView rules={rules} onAsk={(prompt) => { setMode("chat"); sendMessage(prompt); }} />
+            <CoachView rules={rules} stats={stats} onAsk={(prompt) => { setMode("chat"); sendMessage(prompt); }} />
           </motion.div>
         ) : (
           <motion.div
