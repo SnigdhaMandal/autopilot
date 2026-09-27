@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { horizonAccountUrl } from "@/lib/network";
 
 // ── Metric Tile ─────────────────────────────────────────────────────────────
 function MetricTile({
@@ -163,7 +164,7 @@ export default function DashboardPage() {
         if (userPublicKey) {
           try {
             const horizonRes = await fetch(
-              `https://horizon-testnet.stellar.org/accounts/${userPublicKey}`
+              horizonAccountUrl(userPublicKey)
             );
             if (horizonRes.ok) {
               const horizonData = await horizonRes.json();

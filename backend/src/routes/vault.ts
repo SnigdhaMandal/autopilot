@@ -23,6 +23,7 @@ import {
   closeVault,
   VaultType,
 } from "../stellar/vault";
+import { explorerUrl, NETWORK_LABEL } from "../config/network";
 
 const VALID_TYPES: VaultType[] = ["savings", "investment"];
 
@@ -96,10 +97,10 @@ export default async function vaultRoutes(server: FastifyInstance) {
       `;
 
       return reply.status(201).send({
-        message: `${type} vault created on Stellar testnet`,
+        message: `${type} vault created on Stellar ${NETWORK_LABEL}`,
         vault: inserted[0],
         fundTxHash,
-        explorerUrl: `https://stellar.expert/explorer/testnet/tx/${fundTxHash}`,
+        explorerUrl: explorerUrl("tx", fundTxHash),
       });
     } catch (err: any) {
       console.error("[Vault] ✗ Failed to create %s vault:", type, err?.message);
@@ -196,7 +197,7 @@ export default async function vaultRoutes(server: FastifyInstance) {
       return reply.send({
         success: true,
         txHash,
-        explorerUrl: `https://stellar.expert/explorer/${process.env.STELLAR_NETWORK === "mainnet" ? "public" : "testnet"}/tx/${txHash}`,
+        explorerUrl: explorerUrl("tx", txHash),
       });
     } catch (err: any) {
       return reply.status(500).send({ error: err?.message });

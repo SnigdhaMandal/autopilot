@@ -6,6 +6,7 @@ import Image from "next/image";
 import { isConnected, requestAccess } from "@stellar/freighter-api";
 import { Loader2, Wallet, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { NETWORK_LABEL } from "@/lib/network";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -183,7 +184,7 @@ export default function OnboardingPage() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
           </span>
-          Running on Stellar testnet
+          Running on Stellar {NETWORK_LABEL}
         </p>
       </div>
     </div>

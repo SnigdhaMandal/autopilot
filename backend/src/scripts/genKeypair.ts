@@ -15,6 +15,7 @@
 
 import { Keypair } from "@stellar/stellar-sdk";
 import { randomBytes } from "crypto";
+import { explorerUrl } from "../config/network";
 
 const kp = Keypair.random();
 const encryptionKey = randomBytes(32).toString("hex");
@@ -30,4 +31,4 @@ console.log("\n⚠️  NEVER commit the secret key or encryption key to git!");
 console.log("\n💸 Fund this account on testnet:");
 console.log(`   npm run friendbot ${kp.publicKey()}`);
 console.log("\n🔗 View on Stellar Expert:");
-console.log(`   https://stellar.expert/explorer/testnet/account/${kp.publicKey()}\n`);
+console.log(`   ${explorerUrl("account", kp.publicKey())}\n`);
