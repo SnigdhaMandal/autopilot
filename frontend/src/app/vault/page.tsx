@@ -17,6 +17,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import DashboardShell from "@/components/DashboardShell";
+import { explorerUrl, ANCHOR_URL, NETWORK_LABEL } from "@/lib/network";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -333,7 +334,7 @@ function VaultCard({
           </button>
           {vault.fundTxHash && (
             <a
-              href={`https://stellar.expert/explorer/testnet/tx/${vault.fundTxHash}`}
+              href={explorerUrl("tx", vault.fundTxHash)}
               target="_blank"
               rel="noopener noreferrer"
               className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-white/30 hover:text-white/60 bg-white/[0.04] border border-white/[0.06] transition-all"
@@ -548,15 +549,15 @@ export default function VaultPage() {
             </motion.div>
           )}
 
-          {/* Testnet USDC */}
-          {!loading && (
+          {/* Test USDC faucet — only exists on testnet, so hidden on mainnet */}
+          {!loading && ANCHOR_URL && (
             <div className="mt-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-white/50">Get testnet USDC</p>
-                <p className="text-[11px] text-white/25 mt-0.5">Free from the Stellar Anchor testnet</p>
+                <p className="text-xs font-medium text-white/50">Get {NETWORK_LABEL} USDC</p>
+                <p className="text-[11px] text-white/25 mt-0.5">Free from the Stellar Anchor {NETWORK_LABEL}</p>
               </div>
               <a
-                href="https://testanchor.stellar.org/sep24/info"
+                href={ANCHOR_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-xs text-white/40 hover:text-white/70 transition-colors"

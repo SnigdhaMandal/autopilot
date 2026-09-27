@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { explorerUrl } from "@/lib/network";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Copy, Check, ExternalLink, Zap, Shield, Crown,
@@ -86,7 +87,7 @@ function WalletCard({ publicKey }: { publicKey: string }) {
               </AnimatePresence>
             </button>
             <a
-              href={`https://stellar.expert/explorer/testnet/account/${publicKey}`}
+              href={explorerUrl("account", publicKey)}
               target="_blank" rel="noopener noreferrer"
               className="p-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] transition-colors"
               title="View on Stellar Expert"
@@ -378,7 +379,7 @@ function TxHistory({ transactions }: { transactions: Tx[] }) {
             const cfg = typeConfig[tx.type] ?? typeConfig.default;
             const Icon = cfg.icon;
             const stellarUrl = tx.txHash
-              ? `https://stellar.expert/explorer/testnet/tx/${tx.txHash}`
+              ? explorerUrl("tx", tx.txHash)
               : null;
 
             return (

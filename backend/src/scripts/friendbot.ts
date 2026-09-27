@@ -13,9 +13,17 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-const FRIENDBOT_URL = "https://friendbot.stellar.org";
+import { explorerUrl, FRIENDBOT_URL, STELLAR_NETWORK } from "../config/network";
 
 async function fundAccount(publicKey: string): Promise<void> {
+  // Friendbot exists only on testnet. Guarded here so running this against a
+  // mainnet config fails loudly instead of appearing to fund an account.
+  if (!FRIENDBOT_URL) {
+    throw new Error(
+      `Friendbot is not available on ${STELLAR_NETWORK}. Free funding exists only on testnet.`,
+    );
+  }
+
   console.log(`\n💸 Funding ${publicKey.slice(0, 8)}… via Friendbot…`);
 
   const res = await fetch(`${FRIENDBOT_URL}?addr=${publicKey}`);
@@ -33,8 +41,8 @@ async function fundAccount(publicKey: string): Promise<void> {
 
   const txHash = body?.hash ?? body?.id ?? "unknown";
   console.log(`  ✅ Funded! tx hash: ${txHash}`);
-  console.log(`  🔗 https://stellar.expert/explorer/testnet/tx/${txHash}`);
-  console.log(`  🏦 Balance: https://stellar.expert/explorer/testnet/account/${publicKey}`);
+  console.log(`  🔗 ${explorerUrl("tx", txHash)}`);
+  console.log(`  🏦 Balance: ${explorerUrl("account", publicKey)}`);
 }
 
 async function main() {

@@ -3,9 +3,43 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{storage::Instance as _, Address as _, Ledger as _},
-    token, Address, Env,
+    testutils::{storage::Instance as _, Address as _, Ledger as _, MockAuth, MockAuthInvoke},
+    token, Address, Env, IntoVal,
 };
+
+/// A vault registered and initialized with freshly generated owner/engine addresses.
+struct VaultFixture {
+    contract_id: Address,
+    owner: Address,
+    engine: Address,
+}
+
+fn setup_vault(env: &Env) -> VaultFixture {
+    let contract_id = env.register_contract(None, AutopilotVault);
+    let client = AutopilotVaultClient::new(env, &contract_id);
+
+    let owner = Address::generate(env);
+    let engine = Address::generate(env);
+
+    env.mock_all_auths();
+    client.initialize(&owner, &engine);
+
+    VaultFixture {
+        contract_id,
+        owner,
+        engine,
+    }
+}
+
+/// Register a token contract and mint `amount` into the vault.
+fn fund_vault(env: &Env, contract_id: &Address, amount: i128) -> Address {
+    let token_admin = Address::generate(env);
+    let token_address = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    token::StellarAssetClient::new(env, &token_address).mint(contract_id, &amount);
+    token_address
+}
 
 #[test]
 fn test_initialize() {
@@ -153,4 +187,150 @@ fn test_vault_survives_long_inactivity() {
 
     client.withdraw(&500, &token_address);
     assert_eq!(token_client.balance(&owner), 500);
+}
+
+// --- Authorization: withdraw() ---
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_withdraw_without_auth_panics() {
+    let env = Env::default();
+    let vault = setup_vault(&env);
+    let token_address = fund_vault(&env, &vault.contract_id, 1000);
+
+    // Drop the blanket mock installed by setup_vault: from here on, every
+    // require_auth() must be satisfied by an explicit authorization.
+    env.set_auths(&[]);
+
+    AutopilotVaultClient::new(&env, &vault.contract_id).withdraw(&500, &token_address);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_withdraw_with_wrong_owner_panics() {
+    let env = Env::default();
+    let vault = setup_vault(&env);
+    let token_address = fund_vault(&env, &vault.contract_id, 1000);
+
+    // An attacker signs the withdrawal for themselves. The vault requires the
+    // stored owner's signature, so this authorization does not satisfy it.
+    let attacker = Address::generate(&env);
+    let args = (500i128, token_address.clone()).into_val(&env);
+
+    AutopilotVaultClient::new(&env, &vault.contract_id)
+        .mock_auths(&[MockAuth {
+            address: &attacker,
+            invoke: &MockAuthInvoke {
+                contract: &vault.contract_id,
+                fn_name: "withdraw",
+                args,
+                sub_invokes: &[],
+            },
+        }])
+        .withdraw(&500, &token_address);
+}
+
+#[test]
+fn test_withdraw_with_owner_auth_succeeds() {
+    let env = Env::default();
+    let vault = setup_vault(&env);
+    let token_address = fund_vault(&env, &vault.contract_id, 1000);
+    let token_client = token::Client::new(&env, &token_address);
+
+    // The owner — and only the owner — authorizes this exact invocation.
+    let args = (500i128, token_address.clone()).into_val(&env);
+    AutopilotVaultClient::new(&env, &vault.contract_id)
+        .mock_auths(&[MockAuth {
+            address: &vault.owner,
+            invoke: &MockAuthInvoke {
+                contract: &vault.contract_id,
+                fn_name: "withdraw",
+                args,
+                sub_invokes: &[],
+            },
+        }])
+        .withdraw(&500, &token_address);
+
+    assert_eq!(token_client.balance(&vault.contract_id), 500);
+    assert_eq!(token_client.balance(&vault.owner), 500);
+}
+
+// --- Authorization: engine_execute() ---
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_engine_execute_without_auth_panics() {
+    let env = Env::default();
+    let vault = setup_vault(&env);
+    let token_address = fund_vault(&env, &vault.contract_id, 1000);
+
+    env.set_auths(&[]);
+
+    AutopilotVaultClient::new(&env, &vault.contract_id).engine_execute(&300, &token_address);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_engine_execute_with_owner_auth_panics() {
+    let env = Env::default();
+    let vault = setup_vault(&env);
+    let token_address = fund_vault(&env, &vault.contract_id, 1000);
+
+    // The owner is a privileged address, but engine_execute() requires the
+    // engine's signature specifically — owner auth must not be accepted.
+    let args = (300i128, token_address.clone()).into_val(&env);
+
+    AutopilotVaultClient::new(&env, &vault.contract_id)
+        .mock_auths(&[MockAuth {
+            address: &vault.owner,
+            invoke: &MockAuthInvoke {
+                contract: &vault.contract_id,
+                fn_name: "engine_execute",
+                args,
+                sub_invokes: &[],
+            },
+        }])
+        .engine_execute(&300, &token_address);
+}
+
+#[test]
+fn test_engine_execute_with_engine_auth_succeeds() {
+    let env = Env::default();
+    let vault = setup_vault(&env);
+    let token_address = fund_vault(&env, &vault.contract_id, 1000);
+    let token_client = token::Client::new(&env, &token_address);
+
+    let args = (300i128, token_address.clone()).into_val(&env);
+    AutopilotVaultClient::new(&env, &vault.contract_id)
+        .mock_auths(&[MockAuth {
+            address: &vault.engine,
+            invoke: &MockAuthInvoke {
+                contract: &vault.contract_id,
+                fn_name: "engine_execute",
+                args,
+                sub_invokes: &[],
+            },
+        }])
+        .engine_execute(&300, &token_address);
+
+    // Engine-driven transfers pay out to the owner, not to the engine.
+    assert_eq!(token_client.balance(&vault.contract_id), 700);
+    assert_eq!(token_client.balance(&vault.owner), 300);
+    assert_eq!(token_client.balance(&vault.engine), 0);
+}
+
+// --- TTL ---
+
+#[test]
+fn test_extend_ttl_is_permissionless() {
+    let env = Env::default();
+    let vault = setup_vault(&env);
+
+    // extend_ttl() has no require_auth(), so an arbitrary caller may bump the
+    // instance and keep the vault reachable.
+    env.set_auths(&[]);
+    AutopilotVaultClient::new(&env, &vault.contract_id).extend_ttl();
+
+    let ttl = env.as_contract(&vault.contract_id, || env.storage().instance().get_ttl());
+    assert!(ttl >= THIRTY_DAYS_IN_LEDGERS);
 }

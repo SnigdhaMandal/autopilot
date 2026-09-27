@@ -29,11 +29,14 @@ services:
       - key: PORT
         value: 3001
 
+      # The single network switch — see src/config/network.ts.
+      # Change to "mainnet" to migrate; everything else is derived from it.
       - key: STELLAR_NETWORK
         value: testnet
 
-      - key: HORIZON_URL
-        value: https://horizon-testnet.stellar.org
+      # HORIZON_URL intentionally unset: it defaults to the correct endpoint
+      # for STELLAR_NETWORK. Pinning it here would keep pointing at testnet
+      # Horizon after a mainnet switch. Set it only for a private instance.
 
       # ── Set these in Render Dashboard as Secret env vars ──
       - key: DATABASE_URL

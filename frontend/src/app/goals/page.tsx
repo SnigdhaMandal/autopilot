@@ -31,6 +31,18 @@ export default async function GoalsPage() {
     `.catch(() => []),
   ]);
 
+  // Historical trigger frequency per rule drives the goal ETAs, replacing the
+  // previous hardcoded "50 XLM average payment, 4 triggers/week" guess.
+  const rawTxs = await sql`
+    SELECT t.amount, t.type, t."ruleId", t."createdAt"
+    FROM   "AutomatedTransaction" t
+    JOIN   "User" u ON t."userId" = u.id
+    WHERE  u."publicKey" = ${session.publicKey}
+      AND  t."createdAt" > NOW() - INTERVAL '180 days'
+    ORDER  BY t."createdAt" DESC
+    LIMIT  1000
+  `.catch(() => []);
+
   // Explicitly normalise to camelCase so GoalsClient never sees undefined fields
   const goals = (rawGoals as any[]).map((g) => ({
     id:           g.id,
@@ -54,9 +66,18 @@ export default async function GoalsPage() {
     status:      r.status,
   }));
 
+  const transactions = (rawTxs as any[])
+    .filter((t) => t != null)
+    .map((t) => ({
+      amount: Number(t.amount ?? 0),
+      type: t.type ?? "Other",
+      ruleId: t.ruleId ?? t.rule_id ?? null,
+      createdAt: new Date(t.createdAt ?? t.created_at ?? Date.now()).toISOString(),
+    }));
+
   return (
     <DashboardShell publicKey={session.publicKey}>
-      <GoalsClient initialGoals={goals} rules={rules} />
+      <GoalsClient initialGoals={goals} rules={rules} transactions={transactions} />
     </DashboardShell>
   );
 }

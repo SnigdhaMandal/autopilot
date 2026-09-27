@@ -8,12 +8,21 @@
  *  - Submit a signed transaction envelope
  */
 
-import { Horizon, Networks, Asset } from "@stellar/stellar-sdk";
+import { Horizon, Asset } from "@stellar/stellar-sdk";
+import {
+  HORIZON_URL as CONFIG_HORIZON_URL,
+  NETWORK_PASSPHRASE as CONFIG_NETWORK_PASSPHRASE,
+  IS_TESTNET as CONFIG_IS_TESTNET,
+  USDC_CODE,
+  USDC_ISSUER,
+  explorerUrl as configExplorerUrl,
+} from "../config/network";
 
 // ── Config ────────────────────────────────────────────────────────────────
+// Every network-dependent value is resolved in config/network.ts. These are
+// re-exported so existing importers of this module keep working unchanged.
 
-export const HORIZON_URL =
-  process.env.HORIZON_URL ?? "https://horizon-testnet.stellar.org";
+export const HORIZON_URL = CONFIG_HORIZON_URL;
 
 // Hard cap on how long a single Horizon read (e.g. fetching a large account's
 // payment history) may take. Horizon can be slow for accounts with very large
@@ -36,21 +45,12 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-export const NETWORK_PASSPHRASE =
-  process.env.STELLAR_NETWORK === "mainnet"
-    ? Networks.PUBLIC
-    : Networks.TESTNET;
+export const NETWORK_PASSPHRASE = CONFIG_NETWORK_PASSPHRASE;
 
-export const IS_TESTNET = process.env.STELLAR_NETWORK !== "mainnet";
+export const IS_TESTNET = CONFIG_IS_TESTNET;
 
-/**
- * USDC asset on Stellar.
- * Testnet issuer: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
- * Mainnet issuer: GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN  (Circle)
- */
-export const USDC_ASSET = IS_TESTNET
-  ? new Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5")
-  : new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
+/** USDC asset for the active network — issuer resolved in config/network.ts. */
+export const USDC_ASSET = new Asset(USDC_CODE, USDC_ISSUER);
 
 export const XLM_ASSET = Asset.native();
 
@@ -185,8 +185,7 @@ export async function submitTransaction(
   return result.hash;
 }
 
-/** Generate a Stellar Laboratory URL for a tx or account (useful in DB records). */
+/** Generate an explorer URL for a tx or account (useful in DB records). */
 export function explorerUrl(type: "tx" | "account", id: string): string {
-  const net = IS_TESTNET ? "testnet" : "public";
-  return `https://stellar.expert/explorer/${net}/${type}/${id}`;
+  return configExplorerUrl(type, id);
 }

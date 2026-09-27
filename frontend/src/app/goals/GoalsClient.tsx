@@ -7,6 +7,7 @@ import {
   Sparkles, TrendingUp, Clock, CheckCircle2, Loader2,
 } from "lucide-react";
 import Link from "next/link";
+import { calcGoalEta, fmtXlm, type EtaResult, type TxRow } from "@/lib/insights";
 
 interface Goal {
   id: string;
@@ -47,24 +48,14 @@ function ruleAssetOf(rule: Rule): "XLM" | "USDC" {
 // ── AI ETA calc ───────────────────────────────────────────────────────────────
 function calcETA(goal: Goal, rules: Rule[]): string {
   const remaining = (goal.targetAmount ?? 0) - (goal.currentAmount ?? 0);
-  if (remaining <= 0) return "Completed! 🎉";
+  const linked = rules.find(r => r.id === goal.linkedRuleId) ?? null;
 
-  const linked = rules.find(r => r.id === goal.linkedRuleId);
-  if (!linked) return "Link a savings rule to get an ETA";
-
-  // Estimate: assume rule triggers ~4x per week (rough)
-  const weeklyAmount = linked.isPercentage
-    ? (linked.amount / 100) * 50  // 50 XLM avg payment estimate
-    : linked.amount * 4;
-
-  if (weeklyAmount <= 0) return "Calculating…";
-
-  const weeks = Math.ceil(remaining / weeklyAmount);
-  if (weeks <= 1) return "This week";
-  if (weeks <= 4) return `~${weeks} weeks`;
-  const months = Math.ceil(weeks / 4);
-  if (months <= 12) return `~${months} month${months > 1 ? "s" : ""}`;
-  return `~${Math.ceil(months / 12)} year${Math.ceil(months / 12) > 1 ? "s" : ""}`;
+  return calcGoalEta({
+    remaining,
+    rule: linked ? { id: linked.id, amount: linked.amount, isPercentage: linked.isPercentage } : null,
+    ruleTxs: linked ? transactions.filter(t => t.ruleId === linked.id) : [],
+    allTxs: transactions,
+  });
 }
 
 // ── Progress Bar ──────────────────────────────────────────────────────────────
@@ -92,11 +83,13 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
 function GoalCard({
   goal,
   rules,
+  transactions,
   onDelete,
   onLinkRule,
 }: {
   goal: Goal;
   rules: Rule[];
+  transactions: TxRow[];
   onDelete: (id: string) => void;
   onLinkRule: (goalId: string, ruleId: string | null) => void;
 }) {
@@ -163,10 +156,24 @@ function GoalCard({
         <ProgressBar value={goal.currentAmount ?? 0} max={goal.targetAmount ?? 1} />
         <div className="flex items-center justify-between mt-2">
           <span className="text-xs text-white/40">{pct}% complete</span>
-          <span className="text-xs text-white/40 flex items-center gap-1">
-            <Clock className="w-3 h-3" /> {eta}
+          <span
+            className="text-xs text-white/40 flex items-center gap-1"
+            title={
+              eta.basis === "history" && eta.weeklyRate
+                ? `Based on ${fmtXlm(eta.weeklyRate)} XLM/week measured from this rule's history`
+                : eta.basis === "estimate"
+                ? "Estimated — this rule has no transaction history yet"
+                : undefined
+            }
+          >
+            <Clock className="w-3 h-3" /> {eta.label}
           </span>
         </div>
+        {eta.basis === "history" && eta.weeklyRate !== null && (
+          <p className="text-[11px] text-white/25 mt-1.5">
+            Averaging {fmtXlm(eta.weeklyRate)} XLM/week from this rule's actual activity
+          </p>
+        )}
 
         {/* Linked rule */}
         <button
@@ -376,9 +383,11 @@ function NewGoalSheet({
 export default function GoalsClient({
   initialGoals,
   rules,
+  transactions = [],
 }: {
   initialGoals: Goal[];
   rules: Rule[];
+  transactions?: TxRow[];
 }) {
   // Filter out any undefined/null items that may slip through from the DB
   const safeInitial = (initialGoals ?? []).filter(
@@ -458,6 +467,7 @@ export default function GoalsClient({
                 key={goal.id}
                 goal={goal}
                 rules={rules}
+                transactions={transactions}
                 onDelete={handleDelete}
                 onLinkRule={handleLinkRule}
               />

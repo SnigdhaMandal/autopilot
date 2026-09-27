@@ -23,6 +23,7 @@ import { processPaymentDirect } from "../engine/processor";
 import { createVaultOnChain, getVaultBalance } from "../stellar/vault";
 import { fetchXLMBalance } from "../stellar/horizon";
 import { PaymentJobData } from "../engine/queue";
+import { explorerUrl, NETWORK_LABEL } from "../config/network";
 
 const PAYMENT_AMOUNT = "50"; // Simulated incoming payment: 50 XLM
 const RULE_PERCENTAGE = 10;  // Save 10% → should send 5 XLM to vault
@@ -98,7 +99,7 @@ async function run() {
     console.log(`   💰 Initial goal progress: ${goalRows[0].currentAmount} / 100 XLM\n`);
 
     // ── 5. Create vault on Stellar ──────────────────────────────────────
-    console.log("5️⃣  Creating savings vault on Stellar testnet (takes ~5s)...");
+    console.log(`5️⃣  Creating savings vault on Stellar ${NETWORK_LABEL} (takes ~5s)...`);
     const { publicKey: vaultPk, encryptedSecret, fundTxHash } = await createVaultOnChain(userId, "savings");
     await sql`
       INSERT INTO "Vault" (id, "userId", type, "publicKey", "encryptedSecret", "fundTxHash", "createdAt", "updatedAt")
@@ -106,7 +107,7 @@ async function run() {
     `;
     console.log(`   ✅ Vault created on-chain!`);
     console.log(`   🔑 Vault address: ${vaultPk.slice(0, 12)}…`);
-    console.log(`   🔗 Fund tx: https://stellar.expert/explorer/testnet/tx/${fundTxHash}\n`);
+    console.log(`   🔗 Fund tx: ${explorerUrl("tx", fundTxHash)}\n`);
 
     // Check initial vault balance
     const initialBalance = await getVaultBalance(vaultPk);
@@ -142,7 +143,7 @@ async function run() {
     }
 
     console.log(`\n   ✅ Rule executed! Tx hash: ${execResult.txHash}`);
-    console.log(`   🔗 View tx: https://stellar.expert/explorer/testnet/tx/${execResult.txHash}\n`);
+    console.log(`   🔗 View tx: ${explorerUrl("tx", execResult.txHash)}\n`);
 
     // ── 7. Wait and verify vault balance increased ──────────────────────
     console.log("7️⃣  Waiting 5s for Stellar ledger to close, then verifying vault balance...");
